@@ -1,4 +1,113 @@
-waiting_login)
+# bot.py
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+
+import requests
+from bs4 import BeautifulSoup
+import random
+from datetime import datetime
+
+# ========================= CONFIG =========================
+TOKEN = "8333674415:AAFjmtAHgj-n08mg88Ai2C0afGpXc0rGsLo"          # Get from @BotFather
+# Leave empty if you want users to enter credentials via /login
+EKLASE_LOGIN = ""
+EKLASE_PASSWORD = ""
+
+# ===========================================================
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+
+# FSM states
+class AuthState(StatesGroup):
+    waiting_login = State()
+    waiting_password = State()
+
+# In-memory user storage (use database in production)
+users = {}  # user_id -> {login, password, points, level}
+
+# ======================== E-KLASE PARSER ========================
+class EKlase:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+
+    def login(self, login, password):
+        url = "https://my.e-klase.lv/Account/Login"
+        r = self.session.get(url)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        token = soup.find("input", {"name": "__RequestVerificationToken"})["value"]
+
+        data = {
+            "UserName": login,
+            "Password": password,
+            "__RequestVerificationToken": token
+        }
+        resp = self.session.post(url, data=data)
+        return "mana lapa" in resp.url.lower() or resp.status_code == 200
+
+    def get_homework(self):
+        try:
+            r = self.session.get("https://my.e-klase.lv/Homework")
+            soup = BeautifulSoup(r.text, "html.parser")
+            tasks = []
+            for row in soup.select(".homework-row"):
+                date = row.select_one(".date").text.strip() if row.select_one(".date") else "No date"
+                subject = row.select_one(".subject").text.strip()
+                task = row.select_one(".description").text.strip()
+                tasks.append(f"📅 {date}\n📚 {subject}\n✏️ {task}\n")
+            return tasks if tasks else ["No new homework today! 🎉"]
+        except Exception as e:
+            logging.error(e)
+            return ["Failed to load homework 😔"]
+
+ek = EKlase()
+
+# ======================== MOTIVATION (in Latvian) ========================
+motivations = [
+    "Tu esi spējīgs uz daudz vairāk, nekā domā! 💪",
+    "Katra atrisināta uzdevuma padara tevi par supervaroni 🦸‍♂️",
+    "Nevis \"grūti\", bet \"vēl neesmu iemācījies\" 🔥",
+    "Tava nākotne pateiks paldies par šodienu! 🌟",
+    "Tu neesi slinks – tu esi uzlādēšanās režīmā 😎",
+    "Pat Einsteinam bija sliktas dienas. Turpinām! 🚀",
+    "Mācīties = ieguldīt sevī. Tu esi labākais ieguldījums! 💰"
+]
+
+# ======================== COMMAND HANDLERS ========================
+@dp.message(Command("start"))
+async def start(message: Message):
+    user_id = message.from_user.id
+    if user_id not in users:
+        await message.answer(
+            "Sveiks! I'm your personal e-klase study helper! 🤖\n\n"
+            "To get started, I need your e-klase credentials (100% private).\n"
+            "Type /login and follow the instructions!"
+        )
+    else:
+        data = users[user_id]
+        await message.answer(
+            f"Welcome back, champion! 🏆\n"
+            f"Level: {data['level']} | Points: {data['points']}\n\n"
+            "What shall we do today?\n"
+            "/homework – show today's tasks\n"
+            "/motivation – get inspired\n"
+            "/help – smart hints (I won't do it for you!)"
+        )
+
+@dp.message(Command("login"))
+async def login_cmd(message: Message, state: FSMContext):
+    await message.answer("Enter your e-klase username or phone number:")
+    await state.set_state(AuthState.waiting_login)
 
 @dp.message(AuthState.waiting_login)
 async def get_login(message: Message, state: FSMContext):
