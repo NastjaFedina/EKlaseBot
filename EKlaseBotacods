@@ -1,0 +1,86 @@
+waiting_login)
+
+@dp.message(AuthState.waiting_login)
+async def get_login(message: Message, state: FSMContext):
+    await state.update_data(login=message.text)
+    await message.answer("Now enter your password (it won't be shown to anyone):")
+    await state.set_state(AuthState.waiting_password)
+
+@dp.message(AuthState.waiting_password)
+async def get_password(message: Message, state: FSMContext):
+    data = await state.get_data()
+    login = data['login']
+    password = message.text
+    user_id = message.from_user.id
+
+    await message.answer("Logging in to e-klase... ⏳")
+
+    if ek.login(login, password):
+        users[user_id] = {
+            "login": login,
+            "password": password,
+            "points": users.get(user_id, {}).get("points", 0),
+            "level": users.get(user_id, {}).get("level", 1)
+        }
+        await message.answer(
+            "✅ Successfully logged in!\n\n"
+            "You can now use /homework anytime!\n"
+            "+50 points as a bravery bonus 😉"
+        )
+        users[user_id]["points"] += 50
+        await state.clear()
+    else:
+        await message.answer("Wrong username or password 😔 Try again: /login")
+
+@dp.message(Command("homework"))
+async def homework(message: Message):
+    user_id = message.from_user.id
+    if user_id not in users:
+        await message.answer("You need to log in first! /login")
+        return
+
+    await message.answer("Loading homework... 📖")
+    tasks = ek.get_homework()
+    response = "TODAY'S & UPCOMING HOMEWORK\n\n"
+    for t in tasks[:10]:
+        response += t + "—\n"
+    response += "\nYou got this! 💪"
+    await message.answer(response)
+
+@dp.message(Command("motivation"))
+async def motivation(message: Message):
+    mot = random.choice(motivations)
+    await message.answer(f"💚 {mot}")
+
+# Smart help – never gives direct answers
+@dp.message(F.text.regexp(r"(how|what|task|help|palīdz)").lower())
+async def smart_help(message: Message):
+    hints = [
+        "Tell me what YOU already know about this topic. Let's start there! 🧠",
+        "What do you think the first step could be? I'll check it for you! ✅",
+        "Try writing your own answer – I'll tell you if you're on the right track 😉",
+        "Think: what did the teacher want you to learn with this task?",
+        "I'll give you a hint, but only after you guess at least one step! 🔥"
+    ]
+    await message.answer(random.choice(hints))
+
+# Reward system
+@dp.message(F.text.lower().contains("thanks") | F.text.lower().contains("done") | 
+            F.text.lower().contains("paldies") | F.text.lower().contains("izdevās"))
+async def reward(message: Message):
+    user_id = message.from_user.id
+    if user_id in users:
+        users[user_id]["points"] += 10
+        if users[user_id]["points"] >= (users[user_id]["level"] * 100):
+            users[user_id]["level"] += 1
+            await message.answer(f"LEVEL UP! You're now level {users[user_id]['level']}! 🏆")
+        else:
+            await message.answer(f"+10 points! Total: {users[user_id]['points']} 💎")
+
+# ======================== START BOT ========================
+async def main():
+    print("Bot is starting...")
+    await dp.start_polling(bot)
+
+if name == "__main__":
+    asyncio.run(main())
